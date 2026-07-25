@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Portfolio</title>
+  <link rel="stylesheet" href="styles.css">
+  <meta name="description" content="Portfolio — Home, Projects, Contact">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <a class="logo" href="#home">Your Name</a>
+      <nav class="nav">
+        <a href="#home">Home</a>
+        <a href="#projects">Projects</a>
+        <a href="#contact">Contact</a>
+      </nav>
+      <button class="nav-toggle" aria-label="Open navigation">☰</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="home" class="hero">
+      <div class="container">
+        <h1>Hi, I’m Your Name.</h1>
+        <p>Builder of things. Brief one-line tagline or role.</p>
+        <p class="cta"><a href="#projects" class="btn">See my work</a></p>
+      </div>
+    </section>
+
+    <section id="projects" class="projects">
+      <div class="container">
+        <h2>Selected Projects</h2>
+        <div class="projects-grid" id="projects-grid">
+          <!-- Project cards go here. Replace the placeholders with your projects. -->
+          <article class="project">
+            <h3>Project Title 1</h3>
+            <p>Short description of the project. Tech used, role, and link.</p>
+            <p><a href="#" class="project-link" target="_blank">View project</a></p>
+          </article>
+
+          <article class="project">
+            <h3>Project Title 2</h3>
+            <p>Short description of the project. Tech used, role, and link.</p>
+            <p><a href="#" class="project-link" target="_blank">View project</a></p>
+          </article>
+
+          <article class="project">
+            <h3>Project Title 3</h3>
+            <p>Short description of the project. Tech used, role, and link.</p>
+            <p><a href="#" class="project-link" target="_blank">View project</a></p>
+          </article>
+
+        </div>
+      </div>
+    </section>
+
+    <section id="contact" class="contact">
+      <div class="container">
+        <h2>Contact</h2>
+        <p>If you want to get in touch, find me on social media:</p>
+        <ul class="social-links">
+          <li><a href="#" target="_blank">GitHub</a></li>
+          <li><a href="#" target="_blank">LinkedIn</a></li>
+          <li><a href="#" target="_blank">Twitter/X</a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <small>&copy; <span id="year"></span> Your Name. All rights reserved.</small>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
