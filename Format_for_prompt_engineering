@@ -1,0 +1,11 @@
+Role / Persona: [Who should the model be? e.g., "Senior backend engineer"]
+Goal / Task: [What you want accomplished? e.g., "Design an API to upload images"]
+Context / Background: [Relevant project/state info, existing tech stack, constraints already known]
+Inputs / Data & Examples: [Files, sample data, example inputs, few‑shot examples]
+Constraints / Requirements: [Hard rules: formats, libraries, length, security, performance, banned approaches]
+Output Format / Acceptance Criteria: [Exact structure you want (JSON/YAML/bullets), validation criteria, examples of acceptable output]
+
+
+Compact one-line prompt (quick use):
+Role: "AI tutor"; Goal: "Explain recursion simply"; Context: "audience = beginner programmers"; Inputs: "use factorial example"; Constraints: "<=200 words"; Output: "3-step explanation + code snippet"
+
