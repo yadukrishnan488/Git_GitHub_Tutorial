@@ -19,7 +19,27 @@ Structure the response as follows:
 2. Core Deliverable (Code, script, outline, or prompt)
 3. Actionable Next Steps / Best practices
 
+--------------------------------------------------------------------------------------------------------------------------------------------------
+[ROLE]
+Act as an expert [Insert Role, e.g., Senior Full-Stack Developer / Creative Video Director / Technical Researcher].
 
-Compact one-line prompt (quick use):
-Role: "AI tutor"; Goal: "Explain recursion simply"; Context: "audience = beginner programmers"; Inputs: "use factorial example"; Constraints: "<=200 words"; Output: "3-step explanation + code snippet"
+[CONTEXT]
+I am trying to [Insert background info, current state, or the big goal].
+Target Audience / End Goal: [Insert who this is for or what success looks like].
 
+[TASK]
+Your specific objective is to:
+1. [Step 1]
+2. [Step 2]
+3. [Step 3]
+
+[CONSTRAINTS & RULES]
+- Strict Rule 1: [e.g., Explain in simple terms / Write production-ready modular code]
+- Strict Rule 2: [e.g., Keep tone professional / Limit response to 500 words]
+- Exclusions: [What the AI MUST NOT do or mention]
+
+[OUTPUT FORMAT]
+Structure the response as follows:
+1. Executive Summary / High-Level Overview
+2. Core Deliverable (Code, script, outline, image prompt, or detailed plan)
+3. Actionable Next Steps / Best Practices
