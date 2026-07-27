@@ -1,9 +1,23 @@
-Role / Persona: [Who should the model be? e.g., "Senior backend engineer"]
-Goal / Task: [What you want accomplished? e.g., "Design an API to upload images"]
-Context / Background: [Relevant project/state info, existing tech stack, constraints already known]
-Inputs / Data & Examples: [Files, sample data, example inputs, few‑shot examples]
-Constraints / Requirements: [Hard rules: formats, libraries, length, security, performance, banned approaches]
-Output Format / Acceptance Criteria: [Exact structure you want (JSON/YAML/bullets), validation criteria, examples of acceptable output]
+[ROLE]
+Act as an expert [Insert Role, e.g., Senior Full-Stack Developer / Creative Video Director / Technical Researcher].
+
+[CONTEXT]
+I am trying to [Insert background info, current state, or the big goal].
+Target Audience / End Goal: [Insert who this is for or what success looks like].
+
+[TASK]
+Your specific objective is to [Insert exact task step-by-step].
+
+[CONSTRAINTS & RULES]
+- Strict Rule 1: [e.g., Do not use jargon / Keep code modular]
+- Strict Rule 2: [e.g., Output length / Tone of voice / Style preferences]
+- Exclusions: [What the AI MUST NOT do]
+
+[OUTPUT FORMAT]
+Structure the response as follows:
+1. Executive Summary / High-level overview
+2. Core Deliverable (Code, script, outline, or prompt)
+3. Actionable Next Steps / Best practices
 
 
 Compact one-line prompt (quick use):
