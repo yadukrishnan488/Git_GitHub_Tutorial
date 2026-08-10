@@ -42,3 +42,18 @@ Structure the response as follows:
 1. Executive Summary / High-Level Overview
 2. Core Deliverable (Code, script, outline, image prompt, or detailed plan)
 3. Actionable Next Steps / Best Practices
+-----------------------------------------------------------------------------------------------------------------------------------------------------
+
+A useful prompt structure
+
+You can remember:
+
+Role + Context + Task + Requirements + Output Format
+
+For example:
+
+Role: Act as a professional web developer.
+Context: I am a beginner creating a personal portfolio website.
+Task: Create a modern portfolio homepage.
+Requirements: Include Hero, About, Skills, Projects, Services, and Contact sections.
+Output: Provide complete HTML, CSS, and JavaScript code.
