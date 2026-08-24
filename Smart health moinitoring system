@@ -1,0 +1,523 @@
+/***********
+ * Smart Health Monitoring System (ESP32)
+ * With condition logic for Normal / Abnormal / Emergency
+
+ ***********/
+unsigned long lastBlynkUpdate = 0;
+const unsigned long BLYNK_UPDATE_INTERVAL = 5000; // ms
+
+#define BLYNK_AUTH_TOKEN "OcAuCnqFSaojAfiY37FeZDn8xII6YgTO"
+#define BLYNK_TEMPLATE_ID "TMPL3n0jPQiNa"
+#define BLYNK_TEMPLATE_NAME "Healthmon"
+
+
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <Adafruit_MLX90614.h>
+#include <esp_task_wdt.h>
+#include "esp_log.h"   // for esp_log_level_set
+#include <WiFi.h>
+#include <BlynkSimpleEsp32.h>
+
+#include "MAX30105.h"
+#include "spo2_algorithm.h"
+#include "heartRate.h"
+
+MAX30105 particleSensor;
+
+uint32_t irBuffer[100];
+uint32_t redBuffer[100];
+int32_t bufferLength;
+int32_t spo2Reading;
+int8_t validSPO2;
+int32_t heartRateReading;
+int8_t validHeartRate;
+
+
+LiquidCrystal_I2C lcd(0x25, 20, 4);
+Adafruit_MLX90614 mlx;
+
+// -------------------   wifi -----------------------------
+
+
+char ssid[] = "puthenparambil";
+char pass[] = "abhijith583";
+
+// ------------------- PINS -----------------------------
+
+#define BUZZER_PIN 25
+#define PUMP_PIN 26
+#define EMERGENCY_STOP 27
+#define SOLENOID_PIN 2
+// Buttons for simulation
+#define BTN_SELECT 12   // cycle between Heart and SpO2
+#define BTN_DOWN   13
+#define BTN_UP     14
+// ------------------- HC-SR04 Distance Sensor -------------------
+#define TRIG_PIN 19     // Trigger pin for HC-SR04
+#define ECHO_PIN 18     // Echo pin for HC-SR04
+#define PUMP_STATUS_VPIN V6
+
+const float ON_THRESHOLD = 11.0;   // cm - Solenoid ON if object farther than this
+const float OFF_THRESHOLD = 4.0;   // cm - Solenoid OFF if object closer than this
+
+bool solenoidAutoState = false;    // Tracks solenoid ON/OFF
+float distancePercent = 0.0;       // Mapped percentage (0–100%)
+bool max30102Ok = false;
+
+
+
+
+
+
+#define WDT_TIMEOUT 10  // seconds (not pin )
+#define PUMP_VOLUME_ML 5
+#define PUMP_FLOW_ML_PER_MIN 10.5 //(flow rate)
+
+bool pumpRunning = false;
+unsigned long pumpStartTime = 0;
+unsigned long pumpRunDuration = 0;
+
+
+
+// ------------------- VARIABLES ------------------------
+float temperature = 36.5;      // MLX90614
+int heartRatePulse = 75;       // dummy (adjustable)
+int spo2 = 97;                 // dummy (adjustable)
+unsigned long lastReadTime = 0;
+const int READ_INTERVAL = 2000; // ms
+bool mlxOk = false;
+String statusText = "Normal";
+// Pump status virtual pin
+
+
+
+// Which simulated sensor is selected: 1 = Heart, 2 = SpO2
+int selectedSensor = 1;
+
+// Debounce helpers
+unsigned long lastDebounce = 0;
+const unsigned long DEBOUNCE_MS = 150;
+int lastSelectState = HIGH;
+int lastDownState = HIGH;
+int lastUpState = HIGH;
+
+// ------------------- THRESHOLDS ------------------------
+#define HR_LOW 50
+#define HR_HIGH 120
+#define SPO2_LOW 92
+#define SPO2_DLOW 90
+#define TEMP_LOW 35.0
+#define TEMP_HIGH 38.0
+#define TEMP_DHIGH 39.0
+
+// Sanity limits for simulated adjustments
+#define HEART_MIN 30
+#define HEART_MAX 200
+#define SPO2_MIN 50
+#define SPO2_MAX 100
+
+BLYNK_WRITE(V0) {
+  int buttonState = param.asInt(); // 0 or 1 from the Blynk app
+  if (buttonState == 1 && !pumpRunning) {
+    // Calculate runtime for 5 mL
+    float flowPerSec = PUMP_FLOW_ML_PER_MIN / 60.0; // mL/sec
+    pumpRunDuration = (unsigned long)((PUMP_VOLUME_ML / flowPerSec) * 1000); // ms
+
+    // Start pump
+    digitalWrite(PUMP_PIN, HIGH);
+    pumpStartTime = millis();
+    pumpRunning = true;
+
+    // Notify via Serial
+    Serial.println("Pump started for 5 mL injection");
+
+    // Notify Blynk
+    // Blynk.virtualWrite(PUMP_STATUS_VPIN, "Pumping");
+
+    // Reset button in Blynk app to 0 (momentary)
+    // Blynk.virtualWrite(V0, 0);
+  }
+}
+
+
+
+
+// ------------------- SETUP ----------------------------
+void setup() {
+
+  Serial.begin(115200);
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+  Blynk.virtualWrite(PUMP_STATUS_VPIN, "Idle");
+
+
+  // Suppress low-level I2C driver logs (prevents NACK spam)
+  esp_log_level_set("i2c", ESP_LOG_NONE);
+
+  Wire.begin();
+  
+  lcd.init();
+  lcd.backlight();
+
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);     // buzzer off initially
+
+
+  pinMode(PUMP_PIN, OUTPUT);
+  pinMode(EMERGENCY_STOP, INPUT_PULLUP);
+  digitalWrite(PUMP_PIN, LOW);
+  digitalWrite(BUZZER_PIN, LOW);
+
+  // Buttons
+  pinMode(BTN_SELECT, INPUT_PULLUP);
+  pinMode(BTN_DOWN, INPUT_PULLUP);
+  pinMode(BTN_UP, INPUT_PULLUP);
+
+  // Try to init MLX90614 (address 0x5A)
+  if (!mlx.begin(0x5A)) {
+    Serial.println("Warning: MLX90614 not found! Using dummy temperature.");
+    mlxOk = false;
+  } else {
+    Serial.println("MLX90614 initialized successfully.");
+    mlxOk = true;
+  }
+
+bool max30102Ok = false; // add this global variable above setup()
+
+if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
+  Serial.println("Warning: MAX30102 not found! Using dummy values.");
+  lcd.clear();
+  lcd.print("MAX30102 NOT FOUND");
+  delay(1500);
+  lcd.clear();
+  max30102Ok = false;
+} else {
+  particleSensor.setup(50, 1, 2, 100, 69, 4096);
+  Serial.println("MAX30102 initialized");
+  max30102Ok = true;
+}
+
+
+
+  // Welcome text
+  lcd.setCursor(0, 0);
+  lcd.print("   HEALTH MONITORING");
+  lcd.setCursor(0, 1);
+  lcd.print("   SYSTEM");
+  delay(1000);
+  lcd.clear();
+
+  // Watchdog
+  esp_task_wdt_config_t wdt_config = {
+      .timeout_ms = WDT_TIMEOUT * 1000,
+      .trigger_panic = true,
+  };
+  esp_task_wdt_init(&wdt_config);
+  esp_task_wdt_add(NULL);
+
+  setup_extraUltrasonic();
+
+
+}
+// ------------------- SETUP END ----------------------------
+
+
+void setup_extraUltrasonic() {
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+
+  Serial.println("HC-SR04 solenoid control active...");
+}
+
+
+void loop_extraUltrasonic() {
+  // Trigger the sensor
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  // Measure echo time
+  long duration = pulseIn(ECHO_PIN, HIGH, 25000); // timeout for safety
+  float distance = (duration * 0.0343) / 2.0;     // Convert to cm
+
+  // Ignore invalid readings
+  if (distance <= 0 || distance > 400) return;
+
+  // --- Calculate percentage (0–100%) ---
+  if (distance >= ON_THRESHOLD) {
+    distancePercent = 0.0;
+  } else if (distance <= OFF_THRESHOLD) {
+    distancePercent = 100.0;
+  } else {
+    distancePercent = ((ON_THRESHOLD - distance) / (ON_THRESHOLD - OFF_THRESHOLD)) * 100.0;
+  }
+
+  // --- Hysteresis logic controlling solenoid ---
+  if (distance >= ON_THRESHOLD) {
+    solenoidAutoState = true;   // Object far → solenoid ON
+  } else if (distance <= OFF_THRESHOLD) {
+    solenoidAutoState = false;  // Object near → solenoid OFF
+  }
+
+  digitalWrite(SOLENOID_PIN, solenoidAutoState ? HIGH : LOW);
+
+  // // --- Serial Output ---
+  // Serial.print("Distance: ");
+  // Serial.print(distance);
+  // Serial.print(" cm | Percentage: ");
+  // Serial.print(distancePercent, 1);
+  // Serial.print("% | Solenoid: ");
+  // Serial.println(solenoidAutoState ? "ON" : "OFF");
+
+    // --- Display distance percentage on LCD (top-right corner) ---
+  lcd.setCursor(12, 0);  // Column 13 (right side), Row 0 (top line)
+  lcd.print("BOTL");
+  lcd.print((int)distancePercent);  // show integer part only
+  lcd.print("%");
+  // Blynk.virtualWrite(V7, distancePercent); 
+
+
+}
+
+void updateBlynkData() {
+  if (millis() - lastBlynkUpdate >= BLYNK_UPDATE_INTERVAL) {
+    lastBlynkUpdate = millis();
+
+    // Send all Blynk virtual writes at once
+    Blynk.virtualWrite(V0, 0); // reset pump button in app (momentary)
+    Blynk.virtualWrite(V1, heartRatePulse);    // Heart Rate
+    Blynk.virtualWrite(V2, spo2);              // SpO2
+    Blynk.virtualWrite(V3, temperature);       // Temperature
+    Blynk.virtualWrite(V4, statusText);        // Status
+    Blynk.virtualWrite(V5, EMERGENCY_STOP);    // optional, could send stop state
+    Blynk.virtualWrite(V6, pumpRunning ? "Pumping" : "Idle"); // Pump status
+    Blynk.virtualWrite(V7, distancePercent);   // Solenoid percentage
+  }
+}
+
+
+
+
+
+
+// ------------------- LOOP BEGIN -----------------------------
+void loop() {
+  Blynk.run();
+
+  esp_task_wdt_reset();
+  unsigned long now = millis();
+
+  // Always poll buttons (we handle debounce inside)
+  handleButtons();
+
+  Blynk.run();  // keep Blynk alive
+
+ // Handle pump timing
+ if (pumpRunning) {
+  if (millis() - pumpStartTime >= pumpRunDuration) {
+    digitalWrite(PUMP_PIN, LOW);
+    pumpRunning = false;
+
+    Serial.println("Pump finished 5 mL injection");
+    
+    // Update Blynk status
+    Blynk.virtualWrite(PUMP_STATUS_VPIN, "Idle");
+  }
+ }
+
+
+
+  if (now - lastReadTime > READ_INTERVAL) {
+    lastReadTime = now;
+// ----- Read MAX30102 (Heart & SpO2) -----
+if (max30102Ok) {
+  bufferLength = 100;
+  for (byte i = 0; i < bufferLength; i++) {
+    uint8_t retry = 0;
+    while (particleSensor.available() == false && retry < 5) {
+      particleSensor.check();
+      delay(2);
+      retry++;
+    }
+    if (retry >= 5) break;
+
+    redBuffer[i] = particleSensor.getRed();
+    irBuffer[i] = particleSensor.getIR();
+    particleSensor.nextSample();
+  }
+
+  maxim_heart_rate_and_oxygen_saturation(irBuffer, bufferLength, redBuffer,
+                                         &spo2Reading, &validSPO2,
+                                         &heartRateReading, &validHeartRate);
+
+  if (validHeartRate == 1 && heartRateReading > 0 && heartRateReading < 200)
+    heartRatePulse = heartRateReading;
+  else
+    heartRatePulse = 0;
+
+  if (validSPO2 == 1 && spo2Reading > 70 && spo2Reading < 100)
+    spo2 = spo2Reading;
+  else
+    spo2 = 0;
+} 
+else {
+  // Sensor not available → use dummy values
+  heartRatePulse = 75;
+  spo2 = 97;
+}
+
+
+
+    // ----- Read MLX90614 (temperature) -----
+    if (mlxOk) {
+      float tempRead = mlx.readObjectTempC();
+      if (isnan(tempRead)) {
+        Serial.println("Warning: MLX90614 read failed, using dummy value");
+        temperature = 36.5;
+        mlxOk = false;
+      } else {
+        temperature = tempRead;
+      }
+    } else {
+      temperature = 36.5;
+    }
+
+    // heartRatePulse and spo2 are simulated/dummy and possibly modified by buttons
+
+    // ----- Determine condition -----
+    evaluateCondition();
+
+    // ----- Serial Output -----
+    Serial.print("HR: "); Serial.print(heartRatePulse);
+    Serial.print(" bpm | SpO2: "); Serial.print(spo2);
+    Serial.print("% | Temp: "); Serial.print(temperature, 1);
+    Serial.print("°C | Status: "); Serial.println(statusText);
+
+    // Blynk.virtualWrite(V1, heartRatePulse); // Heart Rate
+    // Blynk.virtualWrite(V2, spo2);           // SpO2
+    // Blynk.virtualWrite(V3, temperature);    // Temperature
+    // Blynk.virtualWrite(V4, statusText);     // Status: Normal/Abnormal/Emergency
+
+    // ----- LCD Display -----
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("HR:"); lcd.print(heartRatePulse); lcd.print(" bpm");
+    if (selectedSensor == 1) lcd.print(" <"); // indicator
+
+    lcd.setCursor(0, 1);
+    lcd.print("SpO2:"); lcd.print(spo2); lcd.print("%");
+    if (selectedSensor == 2) lcd.print(" <"); // indicator
+
+    lcd.setCursor(0, 2);
+    lcd.print("Temp:"); lcd.print(temperature, 1); lcd.print("C");
+
+    lcd.setCursor(0, 3);
+    // Pad status text to keep display consistent
+    lcd.print("Status: ");
+    lcd.print(statusText);
+
+    safetyCheck();
+  }
+
+  loop_extraUltrasonic();
+  updateBlynkData();       // sends all virtual pin data every 2s
+
+
+
+  // small non-blocking pause to reduce CPU spin (not a long delay)
+  delay(10);
+}
+
+// ------------------- LOOP END -----------------------------
+
+
+// ------------------- BUTTON HANDLING -------------------
+void handleButtons() {
+  int selectState = digitalRead(BTN_SELECT);
+  int downState = digitalRead(BTN_DOWN);
+  int upState = digitalRead(BTN_UP);
+  unsigned long currentMillis = millis();
+
+  // Basic debounce window
+  if (currentMillis - lastDebounce > DEBOUNCE_MS) {
+
+    // Select button pressed (toggle between Heart and SpO2)
+    if (selectState == LOW && lastSelectState == HIGH) {
+      // Toggle only between 1 and 2 (do not include temp)
+      selectedSensor = (selectedSensor == 1) ? 2 : 1;
+    }
+
+    // Down button pressed
+    if (downState == LOW && lastDownState == HIGH) {
+      if (selectedSensor == 1) {
+        heartRatePulse -= 2;
+        if (heartRatePulse < HEART_MIN) heartRatePulse = HEART_MIN;
+      } else if (selectedSensor == 2) {
+        spo2 -= 1;
+        if (spo2 < SPO2_MIN) spo2 = SPO2_MIN;
+      }
+    }
+
+    // Up button pressed
+    if (upState == LOW && lastUpState == HIGH) {
+      if (selectedSensor == 1) {
+        heartRatePulse += 2;
+        if (heartRatePulse > HEART_MAX) heartRatePulse = HEART_MAX;
+      } else if (selectedSensor == 2) {
+        spo2 += 1;
+        if (spo2 > SPO2_MAX) spo2 = SPO2_MAX;
+      }
+    }
+
+    if ((selectState != lastSelectState) || (downState != lastDownState) || (upState != lastUpState)) {
+      lastDebounce = currentMillis;
+    }
+  }
+
+  lastSelectState = selectState;
+  lastDownState = downState;
+  lastUpState = upState;
+}
+
+// ------------------- LOGIC ----------------------------
+void evaluateCondition() {
+  bool abnormal = false;
+  bool emergency = false;
+
+  // Heart rate
+  if (heartRatePulse < HR_LOW || heartRatePulse > HR_HIGH) abnormal = true;
+  if (heartRatePulse < HR_LOW || heartRatePulse > HR_HIGH) emergency = true;
+
+  // SpO2
+  if (spo2 < SPO2_LOW) abnormal = true;
+  if (spo2 < SPO2_DLOW) emergency = true;
+
+  // Temperature
+  if (temperature > TEMP_HIGH || temperature < TEMP_LOW) abnormal = true;
+  if (temperature > TEMP_DHIGH) emergency = true;
+
+  // Decide status
+  if (emergency) {
+    statusText = "Emergency    ";
+    digitalWrite(BUZZER_PIN, HIGH);
+  } else if (abnormal) {
+    statusText = "Abnormal   ";
+    digitalWrite(BUZZER_PIN, LOW);
+  } else {
+    statusText = "Normal     ";
+    digitalWrite(BUZZER_PIN, LOW);
+  }
+}
+
+// ------------------- SAFETY ---------------------------
+void safetyCheck() {
+  if (digitalRead(EMERGENCY_STOP) == LOW) {
+    digitalWrite(PUMP_PIN, LOW);
+    digitalWrite(BUZZER_PIN, HIGH);
+    lcd.setCursor(0, 3);
+    lcd.print("EMERGENCY STOP!   ");
+    Serial.println("EMERGENCY STOP TRIGGERED!");
+  }
+}
