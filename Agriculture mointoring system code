@@ -1,0 +1,224 @@
+// Blynk template settings
+#define BLYNK_PRINT Serial
+#define BLYNK_TEMPLATE_ID "***************"
+#define BLYNK_TEMPLATE_NAME "*******"
+#define BLYNK_AUTH_TOKEN "********************************"
+
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <HardwareSerial.h>
+#include <DHT.h>
+#include <BlynkSimpleEsp32.h>
+
+int moistureLevel = 0;
+float phLevel = 0;
+int rainLevel = 0;
+int lightLevel = 0;
+float temperature = 0;
+float humidity = 0;
+
+// SIM900A configuration
+HardwareSerial sim900(1); // Use UART1 for ESP32
+#define SIM900_TX 17
+#define SIM900_RX 16
+
+// Wi-Fi credentials for Blynk
+char ssid[] = "GNXS-0d9320";       // Replace with your Wi-Fi SSID
+char pass[] = "0509085899";        // Replace with your Wi-Fi password
+
+// Define sensor pins based on available GPIO on ESP32-CAM
+#define MOISTURE_PIN 34 // Green
+#define PH_PIN 32       // Orange
+#define RAIN_PIN 36     // Brown
+#define LIGHT_PIN 33    // Blue
+#define DHT_PIN 12      // DHT11 sensor pin
+#define RELAY_PIN 4     // Brown
+
+// DHT11 setup
+#define DHTTYPE DHT11
+DHT dht(DHT_PIN, DHTTYPE);
+
+// Blynk virtual pins
+#define VPIN_TEMP V0
+#define VPIN_HUMIDITY V1
+#define VPIN_MOISTURE V2
+#define VPIN_PH V3
+#define VPIN_RAIN V4
+#define VPIN_LIGHT V5
+
+// Initialize the LCD
+LiquidCrystal_I2C lcd(0x27, 20, 4); // Adjust the I2C address if necessary
+
+// Timing variables
+unsigned long lastSendTime = 0;
+const unsigned long interval = 12 * 60 * 60 * 1000; // 12 hours in milliseconds
+
+// Function declarations
+void sendATCommand(const char *command, const int timeout);
+void sendSMS(const char* number, const char* message);
+void handleIncomingCall();
+void sendSensorData();
+
+void setup() {
+  // Start Serial Monitor
+  Serial.begin(115200);
+
+  // Initialize SIM900A
+  sim900.begin(9600, SERIAL_8N1, SIM900_RX, SIM900_TX);
+  Serial.println("Initializing SIM900A...");
+  delay(1000);
+
+  // Enable Caller ID notifications
+  sendATCommand("AT+CLIP=1\r\n", 1000);
+
+  // Initialize Blynk connection
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+
+  // Initialize DHT sensor
+  dht.begin();
+
+  // Set relay pin as output
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, HIGH); // Turn off the relay (assuming active low)
+
+  // Initialize the LCD
+  lcd.init(); 
+  lcd.backlight(); // Turn on the backlight
+
+  // Display project name as loading screen
+  lcd.clear();
+  lcd.setCursor(2, 1);  // Adjust to center the text based on your display
+  lcd.print("AGRICULTURE");
+  lcd.setCursor(1, 2);
+  lcd.print("MONITORING SYSTEM");
+  delay(3000); // Display the loading screen for 3 seconds
+  
+  // Clear LCD for sensor readings
+  lcd.clear();
+
+  // Send initial sensor data
+  sendSensorData();
+  lastSendTime = millis();  // Initialize timer for 12-hour interval
+}
+
+void loop() {
+  Blynk.run(); // Ensure the Blynk app runs properly
+
+  // Handle incoming calls
+  handleIncomingCall();
+
+  // Check if 12 hours have passed
+  if (millis() - lastSendTime >= interval) {
+    sendSensorData();
+    lastSendTime = millis(); // Reset the timer
+  }
+
+  // Read sensor values
+  int moistureLevel = analogRead(MOISTURE_PIN); // Moisture sensor (0-4095)
+  float phLevel = analogRead(PH_PIN) * (14.0 / 4095.0); // Convert to pH scale
+  int rainLevel = analogRead(RAIN_PIN); // Rain sensor (0-4095)
+  int lightLevel = analogRead(LIGHT_PIN); // Light sensor (0-4095)
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+
+  // Convert moisture reading to percentage
+  int moisturePercentage = map(moistureLevel, 0, 4095, 100, 0);
+
+  // Map light level to percentage (0-100)
+  int lightPercentage = map(lightLevel, 0, 4095, 100, 0);
+
+  // Map rain level to percentage (0-100)
+  int rainPercentage = map(rainLevel, 0, 4095, 100, 0);
+
+  // Send sensor data to Blynk
+  Blynk.virtualWrite(VPIN_TEMP, temperature);
+  Blynk.virtualWrite(VPIN_HUMIDITY, humidity);
+  Blynk.virtualWrite(VPIN_MOISTURE, moisturePercentage);
+  Blynk.virtualWrite(VPIN_PH, phLevel);
+  Blynk.virtualWrite(VPIN_RAIN, rainPercentage);
+  Blynk.virtualWrite(VPIN_LIGHT, lightPercentage);
+
+  // Display sensor values on the LCD
+  lcd.setCursor(0, 0);
+  lcd.print("Temp: " + String(temperature, 1) + " C");
+  lcd.setCursor(0, 1);
+  lcd.print("Humidity: " + String(humidity, 1) + " %");
+  lcd.setCursor(0, 2);
+  lcd.print("Moisture: " + String(moisturePercentage) + " %");
+  lcd.setCursor(0, 3);
+  lcd.print("pH: " + String(phLevel, 1) + " Rain: " + String(rainPercentage) + " %");
+
+  // Control the relay based on moisture level
+  if (moisturePercentage <= 40) {
+    digitalWrite(RELAY_PIN, LOW);  // Turn ON the water pump (active low)
+    Serial.println("Relay Status: ON ");
+  } else {
+    digitalWrite(RELAY_PIN, HIGH); // Turn OFF the water pump
+    Serial.println("Relay Status: OFF ");
+  }
+
+  delay(2000); // Delay before next loop
+}
+
+// Function to send AT commands to the SIM900A
+void sendATCommand(const char *command, const int timeout) {
+  sim900.print(command);  // Send AT command
+  long int time = millis();
+  while ((time + timeout) > millis()) {
+    while (sim900.available()) {
+      char c = sim900.read();
+      Serial.write(c);  // Print response from SIM900A to Serial monitor
+    }
+  }
+}
+
+// Function to send SMS via SIM900A
+void sendSMS(const char* number, const char* message) {
+  String cmd = "AT+CMGS=\"" + String(number) + "\"\r\n";
+  sendATCommand(cmd.c_str(), 1000);
+  delay(500);
+  sim900.print(message);
+  delay(500);
+  sim900.write(26); // Send Ctrl+Z to indicate end of message
+  Serial.println("SMS sent!");
+}
+
+// Function to handle incoming calls
+void handleIncomingCall() {
+  if (sim900.available()) {
+    String callInfo = "";
+    while (sim900.available()) {
+      char c = sim900.read();
+      callInfo += c;
+    }
+
+    if (callInfo.indexOf("RING") != -1) {
+      Serial.println("Incoming call detected!");
+      sendSensorData(); // Send sensor data via SMS when call is received
+      Serial.println("Sensor data sent via SMS.");
+    }
+  }
+}
+
+// Function to gather and send sensor data via SMS
+void sendSensorData() {
+  int moistureLevel = analogRead(MOISTURE_PIN);
+  float phLevel = analogRead(PH_PIN) * (14.0 / 4095.0);
+  int rainLevel = analogRead(RAIN_PIN);
+  int lightLevel = analogRead(LIGHT_PIN);
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+
+  int moisturePercentage = map(moistureLevel, 0, 4095, 100, 0);
+  int lightPercentage = map(lightLevel, 0, 4095, 100, 0);
+  int rainPercentage = map(rainLevel, 0, 4095, 100, 0);
+
+  String message = "Temp: " + String(temperature, 1) + " C\n";
+  message += "Humidity: " + String(humidity, 1) + " %\n";
+  message += "Moisture: " + String(moisturePercentage) + " %\n";
+  message += "pH: " + String(phLevel, 1) + "\n";
+  message += "Rain: " + String(rainPercentage) + " %\n";
+  message += "Light: " + String(lightPercentage) + " %\n";
+
+  sendSMS("+917012355095", message.c_str());  // Replace with target number
+}
